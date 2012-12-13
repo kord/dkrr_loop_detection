@@ -3,7 +3,7 @@ import Queue
 import math
 import time
 from statsbuddy import StatsBuddy
-
+from collections import defaultdict
 
 sys.path.append('pyhassel/config_parser')
 sys.path.append('pyhassel')
@@ -31,12 +31,11 @@ class TestNetwork(object):
     There are 2*(switchcount + switchcount*clientsperswitch) unidirectional ports
     The packet headers are full wildcards.
     '''
-    def __init__(self, switchcount = 5, clientsperswitch = 2, minport=0, minswitch=0):
+    def __init__(self, switchcount = 5, clientsperswitch = 2, port_density=1.0):
         if switchcount <= 2: raise Exception('You should use more than 2 switches. Whaddaya, crazy?')
 
-        self.minswitch = minswitch
         self.switchcount = switchcount
-        self.maxswitch = minswitch + switchcount
+        self.port_density = port_density
 
         self.clientsperswitch = clientsperswitch
 
@@ -46,11 +45,17 @@ class TestNetwork(object):
         self.portnum_to_port = {}
         self.port_to_portnum = {}
 
-        self.minport = minport
+        self.entity_to_in_ports = defaultdict(lambda: [])
+        self.entity_to_out_ports = defaultdict(lambda: [])
 
-        for (i, port) in enumerate(self.ports_iter()):
-            self.portnum_to_port[i + minport] = port
-            self.port_to_portnum[port] = i + minport
+
+        for (i, port) in enumerate(self.ports_iter(port_density)):
+            self.portnum_to_port[i] = port
+            self.port_to_portnum[port] = i
+            sender, reciever = port
+            self.entity_to_in_ports[reciever].append(i)
+            self.entity_to_out_ports[sender].append(i)
+
         #for (i, port) in enumerate(self.ports_iter()):
         #    print self.port_to_portnum[port] 
 
@@ -62,7 +67,7 @@ class TestNetwork(object):
 
     
 
-    def ports_iter(self):
+    def ports_iter(self, port_density):
         ''' Iterate over the ports in this network, given as pairs (source, 
         destination), where each element of this pair is either a switch or a client'''
 
@@ -72,10 +77,16 @@ class TestNetwork(object):
             yield (s, (s,c)) # port from switch to client
         # complete graph
         for s1 in self.switch_iter():
-            for s2 in self.switch_iter():
-                if s2 == s1: continue
-                yield (s1, s2)
+            for s2 in [s2 for s2 in self.switch_iter() if s2 < s1]:
+                if s1 == s2 + 1 or port_density == 1.0:
+                    yield (s1, s2)
+                    yield (s2, s1)
+                else:
+                    if rand.random() < port_density:
+                        yield (s1, s2)
+                        yield (s2, s1)
 
+    """
     def in_ports(self, s):
         '''Iterate over the ports that have switch s as their destination'''
         # the switches we neighbour
@@ -91,20 +102,21 @@ class TestNetwork(object):
         for (a, b) in self.in_ports(s): 
             # this works because all links are bidirecional, so all all in_ports have a corresponding out_port
             yield (b, a) 
+    """
 
     def in_portnums(self, s):
         '''Iterate the encoded port numbers for the ports connected into switch s'''
-        for port in self.in_ports(s):
-            yield self.port_to_portnum[port]
+        return self.entity_to_in_ports[s]
+
 
     def out_portnums(self, s):
         '''Iterate the encoded port numbers for the ports connected into switch s'''
-        for port in self.out_ports(s):
-            yield self.port_to_portnum[port]
+        return self.entity_to_out_ports[s]
+
 
     def switch_iter(self):
         ''' Iterate over the switches in this network'''
-        for i in range(self.minswitch, self.maxswitch):
+        for i in range(self.switchcount):
             yield i
 
     def client_iter(self):
@@ -151,7 +163,7 @@ class TestNetwork(object):
 
     def get_random_rule(self, min_in, max_in, min_out, max_out):
         # pick random switch
-        s = rand.randint(self.minswitch, self.maxswitch - 1)
+        s = rand.randint(0, self.switchcount - 1)
         ins = randomsubset(self.in_portnums(s), min_in, max_in)
         outs = randomsubset(self.out_portnums(s), min_out, max_out)
         
@@ -164,7 +176,7 @@ class TestNetwork(object):
 
     def get_random_rewrite_rule(self, min_in, max_in, min_out, max_out, min_match_bits, max_match_bits, min_rewrite_bits, max_rewrite_bits):
         # pick random switch
-        s = rand.randint(self.minswitch, self.maxswitch - 1)
+        s = rand.randint(0, self.switchcount - 1)
         in_ports = randomsubset(self.in_portnums(s), min_in, max_in)
         out_ports = randomsubset(self.out_portnums(s), min_out, max_out)
         match = random_wildcard(min_match_bits, max_match_bits)
@@ -208,9 +220,10 @@ def random_bitstring(min_match_bits, max_match_bits, default, choices, length=HE
 
 def randomsubset(lis, min, max):
     lis = list(lis)
-    if max > len(lis): raise Exception('List too small to take max ' + str(max) + ' elements from.')
+    #if max > len(lis): raise Exception('List too small to take max ' + str(max) + ' elements from.')
     ret = []
     for _ in range(rand.randint(min, max)):
+        if len(lis) == 0: break
         i = rand.randint(0, len(lis) - 1)
         ret.append(lis[i])
         del lis[i]
@@ -222,6 +235,7 @@ def RunTest(num_switches, num_clients, steady_state_avg_rules_per_switch,
                   min_in, max_in, min_out, max_out, 
                   min_match_bits=0, max_match_bits=0, min_rewrite_bits=0, max_rewrite_bits=0,
                   show_trace = False, 
+                  port_density = 1.0,
                   rewrite_rule_probability = 1.0):
     """
     num_switches: 
@@ -244,9 +258,6 @@ def RunTest(num_switches, num_clients, steady_state_avg_rules_per_switch,
     min_out: etc.
     max_out: etc.
 
-    show_trace: 
-        Should we show the trace when loops are detected? This can get hectic and start spinning the terminal.
-    
     min_match_bits: 
         The minimum number of bits to fix as non-'x' in random rewrite rule matchs
     max_match_bits: 
@@ -255,6 +266,17 @@ def RunTest(num_switches, num_clients, steady_state_avg_rules_per_switch,
         The minimum number of bits to explicitly fix randomly as one of 0/1 in output packets
     max_rewrite_bits: 
         Max of above
+
+    show_trace: 
+        Should we show the trace when loops are detected? This can get hectic and start spinning the terminal.
+    
+    port_density:
+        Default of 1.0, indicating the complete graph as the underlying network topology
+        For less than that, the network is a ring with _this_ proportion of the pairs of 
+        switches connected by a pair of 1-way ports.
+
+    rewrite_rule_probability:
+        The proportion of the random rules that should be random rewrite rules rather than random forwarding rules
     """
 
     # some basic info for our run
@@ -267,7 +289,7 @@ def RunTest(num_switches, num_clients, steady_state_avg_rules_per_switch,
         raise Exception('The given parameters will not permit the network to reach a steady state, so no statistics would be collected. Try decreasing "steady_state_avg_rules_per_switch".')
 
     # the network that we'll use to generate random valid rules
-    net = TestNetwork(num_switches, num_clients)
+    net = TestNetwork(num_switches, num_clients, port_density)
 
     # our model
     n = NetworkFlowruleModel() 
@@ -277,7 +299,7 @@ def RunTest(num_switches, num_clients, steady_state_avg_rules_per_switch,
                                           total_rule_installations_before_halt, 
                                           min_in, max_in, min_out, max_out, 
                                           min_match_bits, max_match_bits, min_rewrite_bits, max_rewrite_bits,
-                                          show_trace, rewrite_rule_probability)
+                                          show_trace, port_density, rewrite_rule_probability)
     print 'Steady state will have {} rules installed.'.format(steady_state_rules_in_network)
 
     #start a timer
@@ -339,18 +361,19 @@ def RunTest(num_switches, num_clients, steady_state_avg_rules_per_switch,
     print 'Loops were detected for {:.4%} of rule installs'.format(1.0 * n.loops_detected / total_rule_installations_before_halt)
     print 'Loops were present for {:.4%} of calls to loop detection'.format(1.0 * n.loops_detected / n.loop_detection_calls)
     
-    print n.scc_buckets.graph()
+    print 'SCC sizes are distributed like this:', n.scc_buckets.graph()
 
 
 
 if __name__ == '__main__':
     '''
-    NEW ARGUMENT FORMAT:
+    ARGUMENT FORMAT:
     def RunTest(num_switches, num_clients, steady_state_avg_rules_per_switch, 
                   total_rule_installations_before_halt, 
                   min_in, max_in, min_out, max_out, 
                   min_match_bits=0, max_match_bits=0, min_rewrite_bits=0, max_rewrite_bits=0,
                   show_trace = False, 
+                  sparse_network = 1.0,
                   rewrite_rule_probability = 1.0):
     '''
     '''
@@ -365,9 +388,10 @@ if __name__ == '__main__':
     '''
     #RunTest(20, 5, 100, 100*20*2, # was original line here. use smaller values just to speed things up
     RunTest(20, 2, 80, 100*20*2 , 
-            1, 6, 1, 2, 
+            1, 6, 1, 4, 
             15, 20, 1, 4, # without the 1, these will sometimes be forwarding rules, but we now permit those sometimes anyway with rewrite_rule_probability
-            rewrite_rule_probability = 0.99)
+            #port_density = 0.05,
+            rewrite_rule_probability = 0.95)
     '''
     RunTest(200, 15, 100, 100*200*2, 
             1, 3, 1, 2, 

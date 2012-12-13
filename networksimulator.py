@@ -176,6 +176,8 @@ class NetworkFlowruleModel(object):
         q.put( (initial_spaces, [rnum]) )
         while not q.empty():
             current_places, visited_rules = q.get()
+            # this is to help reduce the depth of the recursion here
+            #current_places = rewrite_space(current_places)
 
             for space, ports in current_places:
                 # sometimes empty spaces can be here. we can ignore them
@@ -270,6 +272,16 @@ class NetworkFlowruleModel(object):
         del self.rulenum_to_outspace[rnum]
         self.dscc.delete_vertex(rnum)
 
+
+def rewrite_space(spaces):
+    ''' Rewrite hs, ports lists to have a single port per item '''
+    ports = set([p for s, ps in spaces for p in ps])
+    for p in ports:
+        hs = headerspace(HEADER_LENGTH / 4)
+        for space, sports in spaces:
+            if p in sports:
+                hs.add_hs(space)
+        yield (hs, [p])
 
     
 ''' NOTES:

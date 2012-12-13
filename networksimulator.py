@@ -24,6 +24,9 @@ ZEROMASK = "0" * (HEADER_LENGTH)
 HEADERSPACE_ALL = headerspace(HEADER_LENGTH / 4)
 HEADERSPACE_ALL.add_hs(hs_string_to_byte_array(ALLMASK))
 
+# this tries to change the grouping of space, port pairs in the loop detection code to reduce the depth of the search.
+TRY_EFFICIENCY_TWEAK = False
+
 
 def pad_to_header_length(string=None, num=None, size=None):
     '''
@@ -177,7 +180,7 @@ class NetworkFlowruleModel(object):
         while not q.empty():
             current_places, visited_rules = q.get()
             # this is to help reduce the depth of the recursion here
-            #current_places = rewrite_space(current_places)
+            if TRY_EFFICIENCY_TWEAK: current_places = rewrite_space(current_places)
 
             for space, ports in current_places:
                 # sometimes empty spaces can be here. we can ignore them

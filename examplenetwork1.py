@@ -388,7 +388,7 @@ if __name__ == '__main__':
     '''
     #RunTest(20, 5, 100, 100*20*2, # was original line here. use smaller values just to speed things up
     RunTest(20, 2, 80, 100*20*2 , 
-            1, 6, 1, 4, 
+            1, 1, 1, 3, 
             15, 20, 1, 4, # without the 1, these will sometimes be forwarding rules, but we now permit those sometimes anyway with rewrite_rule_probability
             #port_density = 0.05,
             rewrite_rule_probability = 0.95)
